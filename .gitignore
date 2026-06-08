@@ -1,0 +1,41 @@
+# .NET build outputs
+bin/
+obj/
+*.exe
+*.dll
+*.pdb
+*.so
+*.dylib
+*.log
+
+# IDE files
+.vs/
+.idea/
+*.user
+*.suo
+*.sln.docstates
+.vscode/
+
+# User secrets
+secrets.json
+appsettings.Local.json
+
+# NuGet
+packages/
+*.nupkg
+
+# OS files
+Thumbs.db
+.DS_Store
+Desktop.ini
+
+# Docker
+docker-compose.override.yml
+
+# Environment
+.env
+.env.local
+
+# Coverage reports
+coverage/
+*.coverage.xml
