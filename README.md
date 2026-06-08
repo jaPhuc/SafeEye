@@ -2,18 +2,10 @@
 
 Guardian-side backend for tracking IoT devices and receiving SOS alerts.
 
-## Prerequisites
-
-- [Docker](https://docs.docker.com/engine/install/) (with Compose v2)
-- [.NET 8 SDK](https://dotnet.microsoft.com/en-us/download/dotnet/8.0) (for local development only)
-
 ## Quick Start (Docker)
 
 ```bash
-# 1. Clone and enter the project
-cd safeeye
-
-# 2. Start all services
+# 1. Start all services
 docker compose up --build
 ```
 
@@ -46,7 +38,6 @@ dotnet run --project src/SafeEye.API
 The API will be available at `http://localhost:5000`. Swagger UI opens at `/swagger`.
 
 > Port `5000` is used for local development to avoid conflict with the Docker container on port `8080`.
-> Set via `Properties/launchSettings.json`.
 
 ## Configuration
 
@@ -60,64 +51,77 @@ The API will be available at `http://localhost:5000`. Swagger UI opens at `/swag
 | `JWT_SECRET` | *(required)* | JWT signing key (min 32 characters) |
 | `JWT_ISSUER` | `SafeEyeAPI` | JWT issuer claim |
 | `JWT_AUDIENCE` | `SafeEyeClients` | JWT audience claim |
-| `FIREBASE_CREDENTIALS_PATH` | *(optional)* | Path to Firebase service account JSON |
+| `FIREBASE_CREDENTIALS_PATH` | `/app/firebase-credentials.json` | Path to Firebase service account JSON |
 | `FIREBASE_RTDB_URL` | *(optional)* | Firebase Realtime Database URL |
-
-### `appsettings.json` (local dev)
-
-The `DefaultConnection` in `appsettings.json` must match the credentials of your running PostgreSQL instance:
-
-```json
-"DefaultConnection": "Host=localhost;Port=5432;Database=safe_eye;Username=sa;Password=12345Abc;"
-```
-
-The `Jwt:Secret` in `appsettings.Development.json` provides a fallback for local development:
-
-```json
-"Jwt:Secret": "dev_only_secret_replace_in_production_min_32_chars!!"
-```
 
 ## API Endpoints
 
-| Method | Path | Description |
+### Auth — `api/auth`
+
+| Method | Route | Auth | Description |
+|---|---|---|---|
+| `POST` | `/api/auth/register` | No | Register a new guardian account |
+| `POST` | `/api/auth/login` | No | Authenticate and receive tokens |
+| `POST` | `/api/auth/refresh` | No | Exchange a refresh token for a new access token |
+| `POST` | `/api/auth/logout` | `[Authorize]` | Invalidate refresh token(s) |
+
+### Users — `api/users`
+
+| Method | Route | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/users/me` | `[Authorize]` | Get current user profile |
+| `PUT` | `/api/users/me` | `[Authorize]` | Update name and/or password |
+| `PUT` | `/api/users/me/fcm-token` | `[Authorize]` | Register/refresh FCM push token |
+
+### Guardian Devices — `api/guardian-devices`
+
+| Method | Route | Auth | Description |
+|---|---|---|---|
+| `POST` | `/api/guardian-devices` | `[Authorize]` | Add a device to watch list using device key |
+| `GET` | `/api/guardian-devices` | `[Authorize]` | List all watched devices with latest location & SOS status |
+| `GET` | `/api/guardian-devices/{id:guid}` | `[Authorize]` | Get a single watched device |
+| `PUT` | `/api/guardian-devices/{id:guid}` | `[Authorize]` | Update display label |
+| `DELETE` | `/api/guardian-devices/{id:guid}` | `[Authorize]` | Stop watching a device |
+
+### IoT Devices — `api/iot`
+
+| Method | Route | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/iot` | No | List all registered IoT devices |
+| `POST` | `/api/iot/register` | No | Register a new IoT device |
+| `POST` | `/api/iot/sos` | `[DeviceAuth]` | REST fallback SOS trigger (normally via Firebase RTDB) |
+
+### SOS Events — `api/sos`
+
+| Method | Route | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/sos` | `[Authorize]` | List SOS events (optional `?status=Active\|Resolved`) |
+| `GET` | `/api/sos/{id:guid}` | `[Authorize]` | Get a single SOS event |
+| `PUT` | `/api/sos/{id:guid}/resolve` | `[Authorize]` | Mark SOS as resolved |
+
+### Real-time
+
+| Type | Route | Auth | Description |
+|---|---|---|---|
+| WebSocket | `/hubs/tracking` | `[Authorize]` | SignalR hub for real-time SOS alerts and device tracking |
+
+### Health
+
+| Method | Route | Description |
 |---|---|---|
-| `POST` | `/api/auth/register` | Register a new user |
-| `POST` | `/api/auth/login` | Login |
-| `POST` | `/api/auth/refresh` | Refresh access token |
-| `POST` | `/api/auth/logout` | Logout |
-| `GET` | `/api/users/me` | Get current user |
-| `PUT` | `/api/users/me` | Update current user |
-| WebSocket | `/hubs/tracking` | SignalR hub for real-time tracking |
 | `GET` | `/health` | Health check (DB connectivity) |
 
-## Project Structure
-
-```
-src/
-├── SafeEye.API/            # ASP.NET Core Web API entry point
-│   ├── Controllers/        # API controllers
-│   ├── Filters/            # Action filters (e.g. DeviceAuthFilter)
-│   ├── Middleware/         # ExceptionMiddleware
-│   └── Properties/         # launchSettings.json
-├── SafeEye.Application/    # CQRS commands, queries, DTOs, interfaces
-├── SafeEye.Domain/         # Entities, repository interfaces
-└── SafeEye.Infrastructure/ # EF Core DbContext, migrations, services
-    ├── Persistence/
-    │   ├── Configurations/ # Entity type configurations
-    │   ├── Migrations/     # EF Core migrations
-    │   └── Repositories/   # Repository implementations
-    ├── Realtime/           # SignalR hub
-    └── Services/           # JwtService, PasswordHasher, etc.
-```
 
 ## Tech Stack
 
 - **.NET 8** – ASP.NET Core Web API
-- **Entity Framework Core** – ORM with Npgsql (PostgreSQL)
+- **Entity Framework Core** – ORM with Npgsql (PostgreSQL 16)
 - **MediatR** – CQRS command/query handling
-- **FluentValidation** – Request validation
+- **FluentValidation** – Request validation (via MediatR pipeline behaviour)
 - **BCrypt.Net** – Password hashing (work factor 12)
-- **JWT Bearer** – Authentication
+- **JWT Bearer** – Authentication with refresh token rotation
 - **SignalR** – Real-time WebSocket communication
 - **Swagger / OpenAPI** – API documentation
-- **Firebase Admin SDK** – Push notifications (optional)
+- **Firebase Admin SDK** – Push notifications (FCM, optional)
+- **Firebase RTDB SSE** – Background listener for device SOS triggers
+- **Docker** – Multi-stage build, Compose with PostgreSQL 16 (Alpine)
