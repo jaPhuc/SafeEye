@@ -51,6 +51,7 @@ The API will be available at `http://localhost:5000`. Swagger UI opens at `/swag
 | `JWT_SECRET` | *(required)* | JWT signing key (min 32 characters) |
 | `JWT_ISSUER` | `SafeEyeAPI` | JWT issuer claim |
 | `JWT_AUDIENCE` | `SafeEyeClients` | JWT audience claim |
+| `GOOGLE_CLIENT_ID` | *(required for Google login)* | Google OAuth 2.0 client ID |
 | `FIREBASE_CREDENTIALS_PATH` | `/app/firebase-credentials.json` | Path to Firebase service account JSON |
 | `FIREBASE_RTDB_URL` | *(optional)* | Firebase Realtime Database URL |
 
@@ -60,8 +61,9 @@ The API will be available at `http://localhost:5000`. Swagger UI opens at `/swag
 
 | Method | Route | Auth | Description |
 |---|---|---|---|
-| `POST` | `/api/auth/register` | No | Register a new guardian account |
-| `POST` | `/api/auth/login` | No | Authenticate and receive tokens |
+| `POST` | `/api/auth/register` | No | Register a new guardian account (name, email, password, phoneNumber) |
+| `POST` | `/api/auth/login` | No | Authenticate with email & password |
+| `POST` | `/api/auth/google-login` | No | Authenticate with Google ID token |
 | `POST` | `/api/auth/refresh` | No | Exchange a refresh token for a new access token |
 | `POST` | `/api/auth/logout` | `[Authorize]` | Invalidate refresh token(s) |
 
