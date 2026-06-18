@@ -14,11 +14,14 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         b.Property(x => x.Id).HasColumnName("id");
         b.Property(x => x.Name).HasColumnName("name").HasMaxLength(80).IsRequired();
         b.Property(x => x.Email).HasColumnName("email").HasMaxLength(256).IsRequired();
-        b.Property(x => x.PasswordHash).HasColumnName("password_hash").IsRequired();
+        b.Property(x => x.PhoneNumber).HasColumnName("phone_number").HasMaxLength(20);
+        b.Property(x => x.PasswordHash).HasColumnName("password_hash");
+        b.Property(x => x.GoogleId).HasColumnName("google_id").HasMaxLength(128);
         b.Property(x => x.FcmToken).HasColumnName("fcm_token");
         b.Property(x => x.CreatedAt).HasColumnName("created_at");
         b.Property(x => x.UpdatedAt).HasColumnName("updated_at");
         b.HasIndex(x => x.Email).IsUnique();
+        b.HasIndex(x => x.GoogleId).IsUnique();
     }
 }
 

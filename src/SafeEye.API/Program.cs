@@ -55,7 +55,9 @@ builder.Services.AddAuthorization();
 builder.Services.AddSignalR();
 
 // ── Controllers ───────────────────────────────────────────────────────────────
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(opts =>
+        opts.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
 
 // ── Filters ───────────────────────────────────────────────────────────────────
 builder.Services.AddScoped<DeviceAuthFilter>();
@@ -100,6 +102,7 @@ builder.Services.AddSwaggerGen(c =>
         Name = "X-Device-Key",
         Description = "IoT device authentication key.",
     });
+    c.OperationFilter<SafeEye.API.Filters.DeviceKeyOperationFilter>();
 });
 
 // ── Health checks ─────────────────────────────────────────────────────────────

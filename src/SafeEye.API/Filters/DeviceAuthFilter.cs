@@ -34,6 +34,40 @@ public sealed class DeviceAuthFilter(IIoTDeviceRepository devices) : IAsyncActio
     }
 }
 
+public sealed class DeviceKeyOperationFilter : Swashbuckle.AspNetCore.SwaggerGen.IOperationFilter
+{
+    public void Apply(Microsoft.OpenApi.Models.OpenApiOperation operation, Swashbuckle.AspNetCore.SwaggerGen.OperationFilterContext context)
+    {
+        var hasFilter = context.MethodInfo.DeclaringType?
+            .GetCustomAttributes(true)
+            .Concat(context.MethodInfo.GetCustomAttributes(true))
+            .Any(a => a.GetType() == typeof(ServiceFilterAttribute)
+                && ((ServiceFilterAttribute)a).ServiceType == typeof(DeviceAuthFilter));
+
+        if (hasFilter == true)
+        {
+            operation.Security =
+            [
+                .. operation.Security ?? [],
+                new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
+                {
+                    {
+                        new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+                        {
+                            Reference = new Microsoft.OpenApi.Models.OpenApiReference
+                            {
+                                Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
+                                Id = "DeviceKey"
+                            }
+                        },
+                        []
+                    }
+                }
+            ];
+        }
+    }
+}
+
 public static class HttpContextExtensions
 {
     public static IoTDevice GetDevice(this HttpContext ctx)

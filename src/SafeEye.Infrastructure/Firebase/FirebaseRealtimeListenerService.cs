@@ -133,17 +133,37 @@ public sealed class FirebaseRealtimeListenerService : BackgroundService
                 "/active" => data.ValueKind == JsonValueKind.True,
                 _ => false
             };
-            if (!active) return;
+            if (!active)
+            {
+                _logger.LogDebug("[Firebase RTDB] SOS data ignored — path={Path}, active=false", path);
+                return;
+            }
 
-            _logger.LogInformation("[Firebase RTDB] SOS active — key={Key}", firebaseKey);
+            _logger.LogInformation("[Firebase RTDB] SOS active detected — key={Key}, path={Path}", firebaseKey, path);
             var gps = await FetchGpsAsync(firebaseKey, rtdbUrl, credPath, ct);
+
+            _logger.LogInformation("[Firebase RTDB] GPS result for key={Key}: lat={Lat}, lng={Lng}",
+                firebaseKey, gps?.Lat, gps?.Lng);
 
             using var scope = _scopeFactory.CreateScope();
             var sender = scope.ServiceProvider.GetRequiredService<ISender>();
+
+            _logger.LogInformation("[Firebase RTDB] Dispatching HandleSosTriggerCommand for device={DeviceId}", deviceId);
             await sender.Send(new HandleSosTriggerCommand(deviceId, gps?.Lat, gps?.Lng), ct);
+            _logger.LogInformation("[Firebase RTDB] SOS event created, now resetting Firebase key={Key}", firebaseKey);
+
             await ResetSosAsync(firebaseKey, rtdbUrl, credPath, ct);
+            _logger.LogInformation("[Firebase RTDB] SOS reset complete for key={Key}", firebaseKey);
         }
-        catch (JsonException ex) { _logger.LogWarning(ex, "[Firebase RTDB] JSON parse error"); }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "[Firebase RTDB] JSON parse error in SSE data: {Json}", json);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[Firebase RTDB] Unexpected error processing SOS for key={Key}, device={DeviceId}",
+                firebaseKey, deviceId);
+        }
     }
 
     private async Task<GpsNode?> FetchGpsAsync(string key, string rtdbUrl, string credPath, CancellationToken ct)

@@ -17,7 +17,7 @@ public sealed class AuthController(ISender sender) : ControllerBase
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Register([FromBody] RegisterRequest req, CancellationToken ct)
     {
-        var result = await sender.Send(new RegisterCommand(req.Name, req.Email, req.Password), ct);
+        var result = await sender.Send(new RegisterCommand(req.Name, req.Email, req.Password, req.PhoneNumber), ct);
         return CreatedAtAction(nameof(Register), result);
     }
 
@@ -27,6 +27,14 @@ public sealed class AuthController(ISender sender) : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> Login([FromBody] LoginRequest req, CancellationToken ct)
         => Ok(await sender.Send(new LoginCommand(req.Email, req.Password), ct));
+
+    /// <summary>Exchange a refresh token for a new access token.</summary>
+    /// <summary>Authenticate with Google ID token.</summary>
+    [HttpPost("google-login")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> GoogleLogin([FromBody] GoogleLoginRequest req, CancellationToken ct)
+        => Ok(await sender.Send(new GoogleLoginCommand(req.IdToken, req.FcmToken), ct));
 
     /// <summary>Exchange a refresh token for a new access token.</summary>
     [HttpPost("refresh")]
@@ -46,7 +54,8 @@ public sealed class AuthController(ISender sender) : ControllerBase
     }
 }
 
-public record RegisterRequest(string Name, string Email, string Password);
+public record RegisterRequest(string Name, string Email, string Password, string? PhoneNumber);
 public record LoginRequest(string Email, string Password);
+public record GoogleLoginRequest(string IdToken, string? FcmToken);
 public record RefreshRequest(string RefreshToken);
 public record LogoutRequest(string? RefreshToken, bool AllDevices = false);

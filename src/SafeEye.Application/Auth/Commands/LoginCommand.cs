@@ -31,7 +31,7 @@ public sealed class LoginCommandHandler(
         var user = await users.GetByEmailAsync(cmd.Email, ct)
                    ?? throw new UnauthorizedException("Invalid email or password.");
 
-        if (!hasher.Verify(cmd.Password, user.PasswordHash))
+        if (user.PasswordHash is null || !hasher.Verify(cmd.Password, user.PasswordHash))
             throw new UnauthorizedException("Invalid email or password.");
 
         var access = jwt.GenerateAccessToken(user.Id);
@@ -39,6 +39,6 @@ public sealed class LoginCommandHandler(
         await tokens.AddAsync(RefreshToken.Create(user.Id, refresh, DateTime.UtcNow.AddDays(7)), ct);
         await uow.SaveChangesAsync(ct);
 
-        return new AuthResultDto(access, refresh, new UserInfoDto(user.Id, user.Name, user.Email));
+        return new AuthResultDto(access, refresh, new UserInfoDto(user.Id, user.Name, user.Email, user.PhoneNumber));
     }
 }

@@ -44,6 +44,6 @@ public sealed class RefreshTokenCommandHandler(
         return new AuthResultDto(
             jwt.GenerateAccessToken(user.Id),
             newRefresh,
-            new UserInfoDto(user.Id, user.Name, user.Email));
+            new UserInfoDto(user.Id, user.Name, user.Email, user.PhoneNumber));
     }
 }

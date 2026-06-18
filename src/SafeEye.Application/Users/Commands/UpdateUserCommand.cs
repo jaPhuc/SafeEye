@@ -39,7 +39,7 @@ public sealed class UpdateUserCommandHandler(
 
         if (cmd.NewPassword is not null)
         {
-            if (!hasher.Verify(cmd.CurrentPassword!, user.PasswordHash))
+            if (user.PasswordHash is null || !hasher.Verify(cmd.CurrentPassword!, user.PasswordHash))
                 throw new ForbiddenException("Current password is incorrect.");
             user.UpdatePassword(hasher.Hash(cmd.NewPassword));
         }

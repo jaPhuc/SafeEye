@@ -34,6 +34,7 @@ public static class DependencyInjection
 
         services.AddSingleton<IJwtService, JwtService>();
         services.AddSingleton<IPasswordHasher, PasswordHasher>();
+        services.AddSingleton<IGoogleAuthService, GoogleAuthService>();
         services.AddScoped<INotificationService, NotificationService>();
         services.AddScoped<IRealtimeNotifier, SignalRRealtimeNotifier>();
 
