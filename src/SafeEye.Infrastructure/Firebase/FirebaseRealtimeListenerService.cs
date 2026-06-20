@@ -310,7 +310,7 @@ public sealed class FirebaseRealtimeListenerService : BackgroundService
                 var notifications = scope.ServiceProvider.GetRequiredService<INotificationService>();
                 await notifications.SendToFirebaseUserAsync(
                     userId,
-                    "🆘 SOS — Cảnh báo khẩn cấp",
+                    "SOS — Cảnh báo khẩn cấp",
                     $"{userId} cần hỗ trợ khẩn cấp.",
                     new Dictionary<string, string>
                     {
