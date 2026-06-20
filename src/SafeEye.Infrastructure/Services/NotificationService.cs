@@ -11,6 +11,7 @@ namespace SafeEye.Infrastructure.Services;
 public sealed class NotificationService(
     IUserRepository users,
     IGuardianDeviceRepository guardianDevices,
+    IIoTDeviceRepository iotDevices,
     IConfiguration config,
     ILogger<NotificationService> logger) : INotificationService
 {
@@ -44,6 +45,20 @@ public sealed class NotificationService(
     {
         var entries = await guardianDevices.GetByDeviceIdAsync(deviceId, ct);
         await Task.WhenAll(entries.Select(e => SendToUserAsync(e.GuardianId, title, body, data, ct)));
+    }
+
+    public async Task SendToFirebaseUserAsync(string firebaseUserId, string title, string body,
+        Dictionary<string, string>? data = null, CancellationToken ct = default)
+    {
+        var device = await iotDevices.GetByFirebaseUserIdAsync(firebaseUserId, ct);
+        if (device is null)
+        {
+            logger.LogWarning("No IoT device found for FirebaseUserId={UserId}", firebaseUserId);
+            return;
+        }
+
+        var guardians = await guardianDevices.GetByDeviceIdAsync(device.Id, ct);
+        await Task.WhenAll(guardians.Select(g => SendToUserAsync(g.GuardianId, title, body, data, ct)));
     }
 
     private async Task SendAsync(string token, string title, string body,

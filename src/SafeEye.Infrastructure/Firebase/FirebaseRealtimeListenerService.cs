@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using SafeEye.Application.Common.Interfaces;
 using SafeEye.Domain.Repositories;
 using Google.Apis.Auth.OAuth2;
 using Microsoft.Extensions.Configuration;
@@ -301,6 +302,28 @@ public sealed class FirebaseRealtimeListenerService : BackgroundService
 
             _logger.LogInformation("[Firebase RTDB] SOS request created at /sos_requests/{PushId} for user={UserId}",
                 pushId, userId);
+
+            // Send push notification to guardians via FCM (works even when app is closed)
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var notifications = scope.ServiceProvider.GetRequiredService<INotificationService>();
+                await notifications.SendToFirebaseUserAsync(
+                    userId,
+                    "🆘 SOS — Cảnh báo khẩn cấp",
+                    $"{userId} cần hỗ trợ khẩn cấp.",
+                    new Dictionary<string, string>
+                    {
+                        ["type"] = "sos",
+                        ["userId"] = userId,
+                        ["lat"] = lat?.ToString("F6") ?? "",
+                        ["lng"] = lng?.ToString("F6") ?? "",
+                    }, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[Firebase RTDB] Failed to send push notification for user={UserId}", userId);
+            }
         }
         catch (Exception ex)
         {
