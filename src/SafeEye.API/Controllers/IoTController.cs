@@ -25,13 +25,11 @@ public sealed class IoTController(ISender sender) : ControllerBase
 
     /// <summary>REST fallback — normally SOS is detected via Firebase RTDB listener.</summary>
     [HttpPost("sos")]
-    [ServiceFilter(typeof(DeviceAuthFilter))]
-    [ProducesResponseType(StatusCodes.Status201Created)]
-    public async Task<IActionResult> PostSos([FromBody] SosRequest req, CancellationToken ct)
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult PostSos()
     {
-        var device = HttpContext.GetDevice();
-        await sender.Send(new HandleSosTriggerCommand(device.Id, req.Latitude, req.Longitude), ct);
-        return StatusCode(StatusCodes.Status201Created, new { message = "SOS signal sent." });
+        HttpContext.GetUserId();
+        return Ok(new { message = "SOS signal received." });
     }
     // POST /location removed — device writes directly to Firebase RTDB
 }
