@@ -49,11 +49,15 @@ public class IoTDeviceConfiguration : IEntityTypeConfiguration<IoTDevice>
         b.Property(x => x.Id).HasColumnName("id");
         b.Property(x => x.DeviceKey).HasColumnName("device_key").HasMaxLength(64).IsRequired();
         b.Property(x => x.Label).HasColumnName("label").HasMaxLength(80).IsRequired();
-        b.Property(x => x.FirebaseDeviceKey).HasColumnName("firebase_device_key").HasMaxLength(100); // ← NEW
+        b.Property(x => x.FirebaseDeviceKey).HasColumnName("firebase_device_key").HasMaxLength(100);
+        b.Property(x => x.FirebaseUserId).HasColumnName("firebase_user_id").HasMaxLength(100);
+        b.Property(x => x.BatteryPercent).HasColumnName("battery_percent");
+        b.Property(x => x.UptimeSeconds).HasColumnName("uptime_seconds");
         b.Property(x => x.LastSeen).HasColumnName("last_seen");
         b.Property(x => x.CreatedAt).HasColumnName("created_at");
         b.HasIndex(x => x.DeviceKey).IsUnique();
-        b.HasIndex(x => x.FirebaseDeviceKey);  // fast lookup by Firebase key
+        b.HasIndex(x => x.FirebaseDeviceKey);
+        b.HasIndex(x => x.FirebaseUserId);
     }
 }
 

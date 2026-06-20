@@ -9,7 +9,8 @@ namespace SafeEye.Application.IoT.Commands;
 
 public record RegisterIoTDeviceCommand(
     string Label,
-    string? FirebaseDeviceKey = null)   // ← NEW optional param
+    string? FirebaseDeviceKey = null,
+    string? FirebaseUserId = null)
     : IRequest<IoTRegistrationDto>;
 
 public class RegisterIoTDeviceCommandValidator : AbstractValidator<RegisterIoTDeviceCommand>
@@ -18,6 +19,7 @@ public class RegisterIoTDeviceCommandValidator : AbstractValidator<RegisterIoTDe
     {
         RuleFor(x => x.Label).NotEmpty().MaximumLength(80);
         RuleFor(x => x.FirebaseDeviceKey).MaximumLength(100).When(x => x.FirebaseDeviceKey != null);
+        RuleFor(x => x.FirebaseUserId).MaximumLength(100).When(x => x.FirebaseUserId != null);
     }
 }
 
@@ -28,9 +30,9 @@ public sealed class RegisterIoTDeviceCommandHandler(
     public async Task<IoTRegistrationDto> Handle(RegisterIoTDeviceCommand cmd, CancellationToken ct)
     {
         var deviceKey = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
-        var device = IoTDevice.Create(deviceKey, cmd.Label, cmd.FirebaseDeviceKey);
+        var device = IoTDevice.Create(deviceKey, cmd.Label, cmd.FirebaseDeviceKey, cmd.FirebaseUserId);
         await iotDevices.AddAsync(device, ct);
         await uow.SaveChangesAsync(ct);
-        return new IoTRegistrationDto(device.Id, deviceKey, device.Label, device.FirebaseDeviceKey);
+        return new IoTRegistrationDto(device.Id, deviceKey, device.Label, device.FirebaseDeviceKey, device.FirebaseUserId);
     }
 }

@@ -40,4 +40,13 @@ public sealed class SosController(ISender sender) : ControllerBase
         await sender.Send(new ResolveSosEventCommand(HttpContext.GetUserId(), id), ct);
         return NoContent();
     }
+
+    /// <summary>Resolve a Firebase SOS request by push ID.</summary>
+    [HttpPut("firebase/{pushId}/resolve")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> ResolveFirebase(string pushId, CancellationToken ct)
+    {
+        await sender.Send(new ResolveFirebaseSosCommand(pushId, HttpContext.GetUserId()), ct);
+        return NoContent();
+    }
 }

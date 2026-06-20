@@ -1,10 +1,9 @@
+using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
-using SafeEye.Application.IoT.Commands;
+using SafeEye.Domain.Repositories;
 using Google.Apis.Auth.OAuth2;
-using MediatR;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -13,11 +12,19 @@ using Microsoft.Extensions.Logging;
 namespace SafeEye.Infrastructure.Firebase;
 
 /// <summary>
-/// BackgroundService that opens a Server-Sent Events (SSE) stream to Firebase
-/// RTDB for every registered IoT device. When sos.active flips to true:
-///   1. Reads GPS from the same device node
-///   2. Dispatches HandleSosTriggerCommand
-///   3. Resets sos.active = false in Firebase (acknowledge)
+/// BackgroundService that monitors Firebase Realtime Database via SSE.
+///
+/// Listens to:
+///   /users.json            — watches for sos button state changes (false→true)
+///   /device_status.json    — updates IoT device heartbeat, battery, uptime
+///
+/// When a user's sos field flips false→true:
+///   1. Reads lat/lng from /users/{userId}
+///   2. Creates a new SOS request at /sos_requests/{pushId} with status "active"
+///   3. Idempotent: repeated true values do NOT create duplicate requests
+///
+/// When a user's sos flips true→false: the existing SOS request remains "active".
+/// Resolution is done exclusively by guardians via the API.
 /// </summary>
 public sealed class FirebaseRealtimeListenerService : BackgroundService
 {
@@ -31,6 +38,9 @@ public sealed class FirebaseRealtimeListenerService : BackgroundService
         "https://www.googleapis.com/auth/firebase.database",
         "https://www.googleapis.com/auth/userinfo.email",
     ];
+
+    /// <summary>Last known sos state per userId. Used to detect false→true transitions.</summary>
+    private readonly ConcurrentDictionary<string, bool> _previousSosStates = new();
 
     public FirebaseRealtimeListenerService(
         IServiceScopeFactory scopeFactory,
@@ -57,26 +67,30 @@ public sealed class FirebaseRealtimeListenerService : BackgroundService
 
         await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
 
-        var devices = await LoadDevicesAsync(stoppingToken);
-        if (devices.Count == 0) { _logger.LogInformation("[Firebase RTDB] No devices with Firebase key. Listener idle."); return; }
+        _logger.LogInformation("[Firebase RTDB] Starting listeners (users/sos, device_status).");
 
-        _logger.LogInformation("[Firebase RTDB] Starting listeners for {Count} device(s).", devices.Count);
+        var tasks = new List<Task>
+        {
+            ListenToUsersAsync(rtdbUrl, credPath, stoppingToken),
+            ListenToDeviceStatusAsync(rtdbUrl, credPath, stoppingToken),
+        };
 
-        var tasks = devices.Select(d => ListenToDeviceAsync(d.DeviceId, d.FirebaseKey, rtdbUrl, credPath, stoppingToken));
         await Task.WhenAll(tasks);
     }
 
-    private async Task ListenToDeviceAsync(Guid deviceId, string firebaseKey,
-        string rtdbUrl, string credPath, CancellationToken ct)
+    // ───── users listener (SOS button state) ───────────────────────────────────
+
+    private async Task ListenToUsersAsync(string rtdbUrl, string credPath, CancellationToken ct)
     {
         var backoff = TimeSpan.FromSeconds(2);
+        var url = $"{rtdbUrl.TrimEnd('/')}/users.json";
+
         while (!ct.IsCancellationRequested)
         {
             try
             {
                 var token = await GetAccessTokenAsync(credPath, ct);
-                var sosUrl = BuildUrl(rtdbUrl, firebaseKey, "sos");
-                using var req = new HttpRequestMessage(HttpMethod.Get, sosUrl);
+                using var req = new HttpRequestMessage(HttpMethod.Get, url);
                 req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
                 req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
                 using var res = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
@@ -84,21 +98,20 @@ public sealed class FirebaseRealtimeListenerService : BackgroundService
                 await using var stream = await res.Content.ReadAsStreamAsync(ct);
                 using var reader = new StreamReader(stream, Encoding.UTF8);
                 backoff = TimeSpan.FromSeconds(2);
-                _logger.LogInformation("[Firebase RTDB] Listening on /{Key}/sos", firebaseKey);
-                await ReadSseStreamAsync(reader, deviceId, firebaseKey, rtdbUrl, credPath, ct);
+                _logger.LogInformation("[Firebase RTDB] Listening on /users");
+                await ReadUsersSseStreamAsync(reader, rtdbUrl, credPath, ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "[Firebase RTDB] Lost connection /{Key}. Retry in {D}s.", firebaseKey, backoff.TotalSeconds);
+                _logger.LogWarning(ex, "[Firebase RTDB] /users connection lost. Retry in {D}s.", backoff.TotalSeconds);
                 await Task.Delay(backoff, ct);
                 backoff = TimeSpan.FromSeconds(Math.Min(backoff.TotalSeconds * 2, 60));
             }
         }
     }
 
-    private async Task ReadSseStreamAsync(StreamReader reader, Guid deviceId,
-        string firebaseKey, string rtdbUrl, string credPath, CancellationToken ct)
+    private async Task ReadUsersSseStreamAsync(StreamReader reader, string rtdbUrl, string credPath, CancellationToken ct)
     {
         string? eventType = null;
         while (!ct.IsCancellationRequested)
@@ -106,18 +119,19 @@ public sealed class FirebaseRealtimeListenerService : BackgroundService
             var line = await reader.ReadLineAsync(ct);
             if (line is null) break;
             if (line.StartsWith("event: ", StringComparison.Ordinal))
-            { eventType = line["event: ".Length..].Trim(); continue; }
+            {
+                eventType = line["event: ".Length..].Trim();
+                continue;
+            }
             if (line.StartsWith("data: ", StringComparison.Ordinal) && eventType is "put" or "patch")
             {
-                await ProcessSseDataAsync(line["data: ".Length..].Trim(),
-                    deviceId, firebaseKey, rtdbUrl, credPath, ct);
+                await ProcessUsersSseDataAsync(line["data: ".Length..].Trim(), rtdbUrl, credPath, ct);
                 eventType = null;
             }
         }
     }
 
-    private async Task ProcessSseDataAsync(string json, Guid deviceId,
-        string firebaseKey, string rtdbUrl, string credPath, CancellationToken ct)
+    private async Task ProcessUsersSseDataAsync(string json, string rtdbUrl, string credPath, CancellationToken ct)
     {
         try
         {
@@ -126,103 +140,275 @@ public sealed class FirebaseRealtimeListenerService : BackgroundService
             var path = root.GetProperty("path").GetString() ?? "/";
             var data = root.GetProperty("data");
 
-            bool active = path switch
+            if (data.ValueKind == JsonValueKind.Null)
+                return;
+
+            // ── Initial dump: record state, do NOT create requests ──
+            if (path == "/")
             {
-                "/" => data.ValueKind == JsonValueKind.Object
-                       && data.TryGetProperty("active", out var a) && a.GetBoolean(),
-                "/active" => data.ValueKind == JsonValueKind.True,
-                _ => false
-            };
-            if (!active)
-            {
-                _logger.LogDebug("[Firebase RTDB] SOS data ignored — path={Path}, active=false", path);
+                if (data.ValueKind != JsonValueKind.Object) return;
+                foreach (var user in data.EnumerateObject())
+                {
+                    RecordSosState(user.Name, user.Value);
+                }
+                _logger.LogInformation("[Firebase RTDB] Initial state recorded for {Count} user(s)", _previousSosStates.Count);
                 return;
             }
 
-            _logger.LogInformation("[Firebase RTDB] SOS active detected — key={Key}, path={Path}", firebaseKey, path);
-            var gps = await FetchGpsAsync(firebaseKey, rtdbUrl, credPath, ct);
+            // ── Extract userId from path segments ──
+            var segments = path.TrimStart('/').Split('/');
+            var userId = segments[0];
+            if (string.IsNullOrEmpty(userId)) return;
 
-            _logger.LogInformation("[Firebase RTDB] GPS result for key={Key}: lat={Lat}, lng={Lng}",
-                firebaseKey, gps?.Lat, gps?.Lng);
-
-            using var scope = _scopeFactory.CreateScope();
-            var sender = scope.ServiceProvider.GetRequiredService<ISender>();
-
-            _logger.LogInformation("[Firebase RTDB] Dispatching HandleSosTriggerCommand for device={DeviceId}", deviceId);
-            await sender.Send(new HandleSosTriggerCommand(deviceId, gps?.Lat, gps?.Lng), ct);
-            _logger.LogInformation("[Firebase RTDB] SOS event created, now resetting Firebase key={Key}", firebaseKey);
-
-            await ResetSosAsync(firebaseKey, rtdbUrl, credPath, ct);
-            _logger.LogInformation("[Firebase RTDB] SOS reset complete for key={Key}", firebaseKey);
+            if (segments.Length == 1)
+            {
+                // Full user object update: /{userId}
+                await ProcessFullUserUpdateAsync(userId, data, rtdbUrl, credPath, ct);
+            }
+            else if (segments.Length == 2 && segments[1] == "sos")
+            {
+                // Single field update: /{userId}/sos
+                await ProcessSosFieldUpdateAsync(userId, data, rtdbUrl, credPath, ct);
+            }
         }
         catch (JsonException ex)
         {
-            _logger.LogWarning(ex, "[Firebase RTDB] JSON parse error in SSE data: {Json}", json);
+            _logger.LogWarning(ex, "[Firebase RTDB] JSON parse error in /users SSE data");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[Firebase RTDB] Unexpected error processing SOS for key={Key}, device={DeviceId}",
-                firebaseKey, deviceId);
+            _logger.LogError(ex, "[Firebase RTDB] Error processing /users SSE data");
         }
     }
 
-    private async Task<GpsNode?> FetchGpsAsync(string key, string rtdbUrl, string credPath, CancellationToken ct)
+    private void RecordSosState(string userId, JsonElement userData)
+    {
+        if (userData.TryGetProperty("sos", out var sosProp) && sosProp.ValueKind == JsonValueKind.True)
+        {
+            _previousSosStates[userId] = true;
+        }
+        else
+        {
+            _previousSosStates[userId] = false;
+        }
+    }
+
+    private async Task ProcessFullUserUpdateAsync(string userId, JsonElement userData,
+        string rtdbUrl, string credPath, CancellationToken ct)
+    {
+        var newSos = userData.TryGetProperty("sos", out var sosProp) && sosProp.ValueKind == JsonValueKind.True;
+        var prevSos = _previousSosStates.GetValueOrDefault(userId, false);
+
+        _previousSosStates[userId] = newSos;
+
+        if (!prevSos && newSos)
+        {
+            _logger.LogInformation("[Firebase RTDB] SOS false→true for user={UserId}", userId);
+            await CreateSosRequestAsync(userId, userData, rtdbUrl, credPath, ct);
+        }
+    }
+
+    private async Task ProcessSosFieldUpdateAsync(string userId, JsonElement sosValue,
+        string rtdbUrl, string credPath, CancellationToken ct)
+    {
+        var newSos = sosValue.ValueKind == JsonValueKind.True;
+        var prevSos = _previousSosStates.GetValueOrDefault(userId, false);
+
+        _previousSosStates[userId] = newSos;
+
+        if (!prevSos && newSos)
+        {
+            _logger.LogInformation("[Firebase RTDB] SOS false→true (field update) for user={UserId}", userId);
+
+            // Fetch full user data to get lat/lng
+            var userData = await FetchUserDataAsync(userId, rtdbUrl, credPath, ct);
+            if (userData is not null)
+            {
+                await CreateSosRequestAsync(userId, userData.Value, rtdbUrl, credPath, ct);
+            }
+            else
+            {
+                _logger.LogWarning("[Firebase RTDB] Could not fetch user data for {UserId} — creating SOS without location", userId);
+                await CreateSosRequestAsync(userId, null, rtdbUrl, credPath, ct);
+            }
+        }
+    }
+
+    private async Task<JsonElement?> FetchUserDataAsync(string userId, string rtdbUrl, string credPath, CancellationToken ct)
     {
         try
         {
             var token = await GetAccessTokenAsync(credPath, ct);
-            using var req = new HttpRequestMessage(HttpMethod.Get, BuildUrl(rtdbUrl, key, "gps"));
+            var url = $"{rtdbUrl.TrimEnd('/')}/users/{userId}.json";
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             using var res = await _http.SendAsync(req, ct);
             if (!res.IsSuccessStatusCode) return null;
-            var gps = JsonSerializer.Deserialize<GpsNode>(await res.Content.ReadAsStringAsync(ct), _json);
-            return gps?.Valid == true ? gps : null;
+            var json = await res.Content.ReadAsStringAsync(ct);
+            if (string.IsNullOrWhiteSpace(json) || json == "null") return null;
+            return JsonDocument.Parse(json).RootElement.Clone();
         }
-        catch (Exception ex) { _logger.LogWarning(ex, "[Firebase RTDB] GPS fetch failed /{Key}", key); return null; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[Firebase RTDB] Failed to fetch user data for {UserId}", userId);
+            return null;
+        }
     }
 
-    private async Task ResetSosAsync(string key, string rtdbUrl, string credPath, CancellationToken ct)
+    private async Task CreateSosRequestAsync(string userId, JsonElement? userData,
+        string rtdbUrl, string credPath, CancellationToken ct)
     {
         try
         {
-            var token = await GetAccessTokenAsync(credPath, ct);
-            using var req = new HttpRequestMessage(new HttpMethod("PATCH"), BuildUrl(rtdbUrl, key, "sos"))
+            double? lat = null;
+            double? lng = null;
+
+            if (userData.HasValue)
             {
-                Content = new StringContent(JsonSerializer.Serialize(new { active = false }), Encoding.UTF8, "application/json")
+                var u = userData.Value;
+                if (u.TryGetProperty("latitude", out var latProp) && latProp.ValueKind == JsonValueKind.Number)
+                    lat = latProp.GetDouble();
+                if (u.TryGetProperty("longitude", out var lngProp) && lngProp.ValueKind == JsonValueKind.Number)
+                    lng = lngProp.GetDouble();
+            }
+
+            var token = await GetAccessTokenAsync(credPath, ct);
+            var url = $"{rtdbUrl.TrimEnd('/')}/sos_requests.json";
+
+            var body = new Dictionary<string, object?>
+            {
+                ["userId"] = userId,
+                ["latitude"] = lat,
+                ["longitude"] = lng,
+                ["status"] = "active",
+                ["timestamp"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                ["resolvedAt"] = null,
+                ["resolvedBy"] = null,
+            };
+
+            var json = JsonSerializer.Serialize(body);
+            using var req = new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
             };
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            await _http.SendAsync(req, ct);
+
+            using var res = await _http.SendAsync(req, ct);
+            res.EnsureSuccessStatusCode();
+
+            var responseJson = await res.Content.ReadAsStringAsync(ct);
+            var pushId = JsonDocument.Parse(responseJson).RootElement.GetProperty("name").GetString();
+
+            _logger.LogInformation("[Firebase RTDB] SOS request created at /sos_requests/{PushId} for user={UserId}",
+                pushId, userId);
         }
-        catch (Exception ex) { _logger.LogWarning(ex, "[Firebase RTDB] SOS reset failed /{Key}", key); }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[Firebase RTDB] Failed to create SOS request for user={UserId}", userId);
+        }
     }
+
+    // ───── device_status listener ──────────────────────────────────────────────
+
+    private async Task ListenToDeviceStatusAsync(string rtdbUrl, string credPath, CancellationToken ct)
+    {
+        var backoff = TimeSpan.FromSeconds(2);
+        var url = $"{rtdbUrl.TrimEnd('/')}/device_status.json";
+
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                var token = await GetAccessTokenAsync(credPath, ct);
+                using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                using var res = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+                res.EnsureSuccessStatusCode();
+                await using var stream = await res.Content.ReadAsStreamAsync(ct);
+                using var reader = new StreamReader(stream, Encoding.UTF8);
+                backoff = TimeSpan.FromSeconds(2);
+                _logger.LogInformation("[Firebase RTDB] Listening on /device_status");
+                await ReadDeviceStatusSseStreamAsync(reader, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[Firebase RTDB] /device_status connection lost. Retry in {D}s.", backoff.TotalSeconds);
+                await Task.Delay(backoff, ct);
+                backoff = TimeSpan.FromSeconds(Math.Min(backoff.TotalSeconds * 2, 60));
+            }
+        }
+    }
+
+    private async Task ReadDeviceStatusSseStreamAsync(StreamReader reader, CancellationToken ct)
+    {
+        string? eventType = null;
+        while (!ct.IsCancellationRequested)
+        {
+            var line = await reader.ReadLineAsync(ct);
+            if (line is null) break;
+            if (line.StartsWith("event: ", StringComparison.Ordinal))
+            {
+                eventType = line["event: ".Length..].Trim();
+                continue;
+            }
+            if (line.StartsWith("data: ", StringComparison.Ordinal) && eventType is "put")
+            {
+                await ProcessDeviceStatusSseDataAsync(line["data: ".Length..].Trim(), ct);
+                eventType = null;
+            }
+        }
+    }
+
+    private async Task ProcessDeviceStatusSseDataAsync(string json, CancellationToken ct)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            var path = root.GetProperty("path").GetString() ?? "/";
+            var data = root.GetProperty("data");
+
+            if (path == "/" || data.ValueKind != JsonValueKind.Object)
+                return;
+
+            var deviceKey = path.TrimStart('/');
+            if (string.IsNullOrEmpty(deviceKey))
+                return;
+
+            var battery = data.TryGetProperty("battery_percent", out var b) ? b.GetDouble() : (double?)null;
+            var uptime = data.TryGetProperty("uptime_seconds", out var u) ? u.GetInt64() : (long?)null;
+
+            using var scope = _scopeFactory.CreateScope();
+            var repo = scope.ServiceProvider.GetRequiredService<IIoTDeviceRepository>();
+            var device = await repo.GetByFirebaseKeyAsync(deviceKey, ct);
+            if (device is null)
+            {
+                _logger.LogDebug("[Firebase RTDB] No IoTDevice found for device_key={Key}", deviceKey);
+                return;
+            }
+
+            device.UpdateLastSeen(battery, uptime);
+            var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            await uow.SaveChangesAsync(ct);
+
+            _logger.LogDebug("[Firebase RTDB] Updated device {DeviceId} ({Label}) — batt={Batt}, uptime={Uptime}",
+                device.Id, device.Label, battery, uptime);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "[Firebase RTDB] JSON parse error in device_status SSE data");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[Firebase RTDB] Error processing device_status SSE data");
+        }
+    }
+
+    // ───── Shared helpers ──────────────────────────────────────────────────────
 
     private static async Task<string> GetAccessTokenAsync(string credPath, CancellationToken ct)
         => await ((ITokenAccess)GoogleCredential.FromFile(credPath).CreateScoped(_scopes))
                .GetAccessTokenForRequestAsync(cancellationToken: ct);
-
-    private static string BuildUrl(string rtdbUrl, string key, string child)
-        => $"{rtdbUrl.TrimEnd('/')}/{key}/{child}.json";
-
-    private async Task<List<(Guid DeviceId, string FirebaseKey)>> LoadDevicesAsync(CancellationToken ct)
-    {
-        using var scope = _scopeFactory.CreateScope();
-        var repo = scope.ServiceProvider.GetRequiredService<Domain.Repositories.IIoTDeviceRepository>();
-        return (await repo.GetAllWithFirebaseKeyAsync(ct))
-               .Where(d => !string.IsNullOrWhiteSpace(d.FirebaseDeviceKey))
-               .Select(d => (d.Id, d.FirebaseDeviceKey!)).ToList();
-    }
-
-    private static readonly JsonSerializerOptions _json = new() { PropertyNameCaseInsensitive = true };
-
-    private sealed class GpsNode
-    {
-        [JsonPropertyName("lat")] public double Lat { get; set; }
-        [JsonPropertyName("lng")] public double Lng { get; set; }
-        [JsonPropertyName("alt")] public double Alt { get; set; }
-        [JsonPropertyName("speed")] public double Speed { get; set; }
-        [JsonPropertyName("hdop")] public double Hdop { get; set; }
-        [JsonPropertyName("satellites")] public int Satellites { get; set; }
-        [JsonPropertyName("valid")] public bool Valid { get; set; }
-        [JsonPropertyName("timestamp")] public long Timestamp { get; set; }
-    }
 }

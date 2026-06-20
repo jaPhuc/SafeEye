@@ -25,6 +25,10 @@ public sealed class GetAllDevicesQueryHandler(
             d.DeviceKey,
             d.Label,
             d.FirebaseDeviceKey,
+            d.FirebaseUserId,
+            d.BatteryPercent,
+            d.UptimeSeconds,
+            d.LastSeen,
             groupCounts.GetValueOrDefault(d.Id, 0)
         )).ToList();
     }

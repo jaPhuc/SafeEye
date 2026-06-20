@@ -20,7 +20,8 @@ public sealed class GoogleLoginCommandHandler(
     IRefreshTokenRepository tokens,
     IUnitOfWork uow,
     IJwtService jwt,
-    IGoogleAuthService googleAuth) : IRequestHandler<GoogleLoginCommand, AuthResultDto>
+    IGoogleAuthService googleAuth,
+    IFirebaseUserService firebaseUser) : IRequestHandler<GoogleLoginCommand, AuthResultDto>
 {
     public async Task<AuthResultDto> Handle(GoogleLoginCommand cmd, CancellationToken ct)
     {
@@ -43,10 +44,13 @@ public sealed class GoogleLoginCommandHandler(
         if (user is null)
             user = await users.GetByEmailAsync(email, ct);
 
+        var isNewUser = false;
+
         if (user is null)
         {
             user = User.CreateFromGoogle(googleUser.Name, email, googleUser.Subject);
             await users.AddAsync(user, ct);
+            isNewUser = true;
         }
         else if (user.GoogleId is null)
         {
@@ -60,6 +64,11 @@ public sealed class GoogleLoginCommandHandler(
         var refresh = jwt.GenerateRefreshToken();
         await tokens.AddAsync(RefreshToken.Create(user.Id, refresh, DateTime.UtcNow.AddDays(7)), ct);
         await uow.SaveChangesAsync(ct);
+
+        if (isNewUser || user.PhoneNumber is not null)
+        {
+            await firebaseUser.CreateUserAsync(user.Id.ToString(), user.Name, user.PhoneNumber, ct);
+        }
 
         return new AuthResultDto(access, refresh, new UserInfoDto(user.Id, user.Name, user.Email, user.PhoneNumber));
     }

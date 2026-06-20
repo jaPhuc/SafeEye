@@ -19,7 +19,7 @@ public sealed class IoTController(ISender sender) : ControllerBase
     [ProducesResponseType(StatusCodes.Status201Created)]
     public async Task<IActionResult> Register([FromBody] RegisterDeviceRequest req, CancellationToken ct)
     {
-        var result = await sender.Send(new RegisterIoTDeviceCommand(req.Label, req.FirebaseDeviceKey), ct);
+        var result = await sender.Send(new RegisterIoTDeviceCommand(req.Label, req.FirebaseDeviceKey, req.FirebaseUserId), ct);
         return StatusCode(StatusCodes.Status201Created, result);
     }
 
@@ -36,5 +36,5 @@ public sealed class IoTController(ISender sender) : ControllerBase
     // POST /location removed — device writes directly to Firebase RTDB
 }
 
-public record RegisterDeviceRequest(string Label, string? FirebaseDeviceKey = null);
+public record RegisterDeviceRequest(string Label, string? FirebaseDeviceKey = null, string? FirebaseUserId = null);
 public record SosRequest(double? Latitude = null, double? Longitude = null);

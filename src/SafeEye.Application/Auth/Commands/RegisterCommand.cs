@@ -26,7 +26,8 @@ public sealed class RegisterCommandHandler(
     IRefreshTokenRepository tokens,
     IUnitOfWork uow,
     IPasswordHasher hasher,
-    IJwtService jwt) : IRequestHandler<RegisterCommand, AuthResultDto>
+    IJwtService jwt,
+    IFirebaseUserService firebaseUser) : IRequestHandler<RegisterCommand, AuthResultDto>
 {
     public async Task<AuthResultDto> Handle(RegisterCommand cmd, CancellationToken ct)
     {
@@ -40,6 +41,8 @@ public sealed class RegisterCommandHandler(
         var refresh = jwt.GenerateRefreshToken();
         await tokens.AddAsync(RefreshToken.Create(user.Id, refresh, DateTime.UtcNow.AddDays(7)), ct);
         await uow.SaveChangesAsync(ct);
+
+        await firebaseUser.CreateUserAsync(user.Id.ToString(), user.Name, user.PhoneNumber, ct);
 
         return new AuthResultDto(access, refresh, new UserInfoDto(user.Id, user.Name, user.Email, user.PhoneNumber));
     }

@@ -36,6 +36,7 @@ public static class DependencyInjection
         services.AddSingleton<IPasswordHasher, PasswordHasher>();
         services.AddSingleton<IGoogleAuthService, GoogleAuthService>();
         services.AddScoped<INotificationService, NotificationService>();
+        services.AddScoped<IFirebaseUserService, FirebaseUserService>();
         services.AddScoped<IRealtimeNotifier, SignalRRealtimeNotifier>();
 
         var credPath = configuration["Firebase:CredentialsPath"];
