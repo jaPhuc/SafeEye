@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using SafeEye.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using SafeEye.Infrastructure.Persistence;
 namespace SafeEye.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260621115410_AddDeviceIdAndSecretKey")]
+    partial class AddDeviceIdAndSecretKey
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -37,16 +40,9 @@ namespace SafeEye.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("device_id");
 
-                    b.Property<string>("FcmToken")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("fcm_token");
-
-                    b.Property<string>("GuardianUuid")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("guardian_uuid");
+                    b.Property<Guid>("GuardianId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("guardian_id");
 
                     b.Property<string>("Label")
                         .IsRequired()
@@ -62,9 +58,7 @@ namespace SafeEye.Infrastructure.Migrations
 
                     b.HasIndex("DeviceId");
 
-                    b.HasIndex("GuardianUuid");
-
-                    b.HasIndex("GuardianUuid", "DeviceId")
+                    b.HasIndex("GuardianId", "DeviceId")
                         .IsUnique();
 
                     b.ToTable("guardian_devices", (string)null);
@@ -102,6 +96,11 @@ namespace SafeEye.Infrastructure.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("firebase_device_key");
 
+                    b.Property<string>("FirebaseUserId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("firebase_user_id");
+
                     b.Property<string>("Label")
                         .IsRequired()
                         .HasMaxLength(80)
@@ -131,7 +130,43 @@ namespace SafeEye.Infrastructure.Migrations
 
                     b.HasIndex("FirebaseDeviceKey");
 
+                    b.HasIndex("FirebaseUserId");
+
                     b.ToTable("iot_devices", (string)null);
+                });
+
+            modelBuilder.Entity("SafeEye.Domain.Entities.RefreshToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("Token")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("token");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Token")
+                        .IsUnique();
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("refresh_tokens", (string)null);
                 });
 
             modelBuilder.Entity("SafeEye.Domain.Entities.SosEvent", b =>
@@ -161,10 +196,9 @@ namespace SafeEye.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("resolved_at");
 
-                    b.Property<string>("ResolvedByGuardianUuid")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("resolved_by_guardian_uuid");
+                    b.Property<Guid?>("ResolvedById")
+                        .HasColumnType("uuid")
+                        .HasColumnName("resolved_by_id");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -176,9 +210,67 @@ namespace SafeEye.Infrastructure.Migrations
 
                     b.HasIndex("DeviceId");
 
+                    b.HasIndex("ResolvedById");
+
                     b.HasIndex("Status");
 
                     b.ToTable("sos_events", (string)null);
+                });
+
+            modelBuilder.Entity("SafeEye.Domain.Entities.User", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("email");
+
+                    b.Property<string>("FcmToken")
+                        .HasColumnType("text")
+                        .HasColumnName("fcm_token");
+
+                    b.Property<string>("GoogleId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("google_id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("PasswordHash")
+                        .HasColumnType("text")
+                        .HasColumnName("password_hash");
+
+                    b.Property<string>("PhoneNumber")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("phone_number");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Email")
+                        .IsUnique();
+
+                    b.HasIndex("GoogleId")
+                        .IsUnique();
+
+                    b.ToTable("users", (string)null);
                 });
 
             modelBuilder.Entity("SafeEye.Domain.Entities.GuardianDevice", b =>
@@ -189,7 +281,26 @@ namespace SafeEye.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("SafeEye.Domain.Entities.User", "Guardian")
+                        .WithMany("WatchedDevices")
+                        .HasForeignKey("GuardianId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
                     b.Navigation("Device");
+
+                    b.Navigation("Guardian");
+                });
+
+            modelBuilder.Entity("SafeEye.Domain.Entities.RefreshToken", b =>
+                {
+                    b.HasOne("SafeEye.Domain.Entities.User", "User")
+                        .WithMany("RefreshTokens")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("SafeEye.Domain.Entities.SosEvent", b =>
@@ -200,7 +311,14 @@ namespace SafeEye.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("SafeEye.Domain.Entities.User", "ResolvedBy")
+                        .WithMany()
+                        .HasForeignKey("ResolvedById")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("Device");
+
+                    b.Navigation("ResolvedBy");
                 });
 
             modelBuilder.Entity("SafeEye.Domain.Entities.IoTDevice", b =>
@@ -208,6 +326,13 @@ namespace SafeEye.Infrastructure.Migrations
                     b.Navigation("GuardianDevices");
 
                     b.Navigation("SosEvents");
+                });
+
+            modelBuilder.Entity("SafeEye.Domain.Entities.User", b =>
+                {
+                    b.Navigation("RefreshTokens");
+
+                    b.Navigation("WatchedDevices");
                 });
 #pragma warning restore 612, 618
         }

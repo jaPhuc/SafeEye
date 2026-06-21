@@ -3,16 +3,13 @@ using SafeEye.Domain.Repositories;
 using FirebaseAdmin;
 using FirebaseAdmin.Messaging;
 using Google.Apis.Auth.OAuth2;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace SafeEye.Infrastructure.Services;
 
 public sealed class NotificationService(
-    IUserRepository users,
     IGuardianDeviceRepository guardianDevices,
     IIoTDeviceRepository iotDevices,
-    IConfiguration config,
     ILogger<NotificationService> logger) : INotificationService
 {
     private static bool _firebaseInitialized;
@@ -32,33 +29,25 @@ public sealed class NotificationService(
         }
     }
 
-    public async Task SendToUserAsync(Guid userId, string title, string body,
-        Dictionary<string, string>? data = null, CancellationToken ct = default)
-    {
-        var user = await users.GetByIdAsync(userId, ct);
-        if (user?.FcmToken is null) return;
-        await SendAsync(user.FcmToken, title, body, data, ct);
-    }
-
     public async Task SendToGuardiansOfDeviceAsync(Guid deviceId, string title, string body,
         Dictionary<string, string>? data = null, CancellationToken ct = default)
     {
         var entries = await guardianDevices.GetByDeviceIdAsync(deviceId, ct);
-        await Task.WhenAll(entries.Select(e => SendToUserAsync(e.GuardianId, title, body, data, ct)));
+        await Task.WhenAll(entries.Select(e => SendAsync(e.FcmToken, title, body, data, ct)));
     }
 
     public async Task SendToFirebaseUserAsync(string firebaseUserId, string title, string body,
         Dictionary<string, string>? data = null, CancellationToken ct = default)
     {
-        var device = await iotDevices.GetByFirebaseUserIdAsync(firebaseUserId, ct);
+        var device = await iotDevices.GetByDeviceIdAsync(firebaseUserId, ct);
         if (device is null)
         {
-            logger.LogWarning("No IoT device found for FirebaseUserId={UserId}", firebaseUserId);
+            logger.LogWarning("No IoT device found for DeviceId={DeviceId}", firebaseUserId);
             return;
         }
 
         var guardians = await guardianDevices.GetByDeviceIdAsync(device.Id, ct);
-        await Task.WhenAll(guardians.Select(g => SendToUserAsync(g.GuardianId, title, body, data, ct)));
+        await Task.WhenAll(guardians.Select(e => SendAsync(e.FcmToken, title, body, data, ct)));
     }
 
     private async Task SendAsync(string token, string title, string body,

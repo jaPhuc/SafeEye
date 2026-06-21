@@ -1,7 +1,8 @@
 namespace SafeEye.Application.IoT.Dtos;
 
 public record IoTRegistrationDto(
-    Guid DeviceId,
+    Guid Id,
+    string DeviceId,
     string DeviceKey,
     string Label,
     string? FirebaseDeviceKey,
@@ -10,10 +11,9 @@ public record IoTRegistrationDto(
 public record IoTDeviceDto(
     Guid Id,
     string DeviceKey,
+    string DeviceId,
     string Label,
     string? FirebaseDeviceKey,
-    string? FirebaseUserId,
     double? BatteryPercent,
     long? UptimeSeconds,
-    DateTime? LastSeen,
-    int GuardianCount);
+    DateTime? LastSeen);

@@ -13,7 +13,7 @@ public record SosPayload(
 public record SosResolvedPayload(
     Guid SosEventId,
     Guid DeviceId,
-    Guid ResolvedById,
+    string ResolvedByGuardianUuid,
     DateTime Timestamp);
 
 public interface IRealtimeNotifier

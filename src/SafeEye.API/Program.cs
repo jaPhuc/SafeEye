@@ -1,13 +1,9 @@
-using System.Text;
-using SafeEye.API.Filters;
 using SafeEye.API.Middleware;
 using SafeEye.Application;
 using SafeEye.Infrastructure;
 using SafeEye.Infrastructure.Persistence;
 using SafeEye.Infrastructure.Realtime;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -16,41 +12,6 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddApplicationServices();
 builder.Services.AddInfrastructureServices(builder.Configuration);
 
-// ── JWT Authentication ────────────────────────────────────────────────────────
-var jwtSecret = builder.Configuration["Jwt:Secret"]
-    ?? throw new InvalidOperationException("Jwt:Secret is not configured.");
-
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(opts =>
-    {
-        opts.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidIssuer = builder.Configuration["Jwt:Issuer"],
-            ValidateAudience = true,
-            ValidAudience = builder.Configuration["Jwt:Audience"],
-            ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret)),
-            ValidateLifetime = true,
-            ClockSkew = TimeSpan.Zero,
-        };
-
-        // Allow JWT in SignalR query string (?access_token=...)
-        opts.Events = new JwtBearerEvents
-        {
-            OnMessageReceived = ctx =>
-            {
-                var token = ctx.Request.Query["access_token"];
-                if (!string.IsNullOrEmpty(token) &&
-                    ctx.HttpContext.Request.Path.StartsWithSegments("/hubs"))
-                    ctx.Token = token;
-                return Task.CompletedTask;
-            },
-        };
-    });
-
-builder.Services.AddAuthorization();
-
 // ── SignalR ───────────────────────────────────────────────────────────────────
 builder.Services.AddSignalR();
 
@@ -58,9 +19,6 @@ builder.Services.AddSignalR();
 builder.Services.AddControllers()
     .AddJsonOptions(opts =>
         opts.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
-
-// ── Filters ───────────────────────────────────────────────────────────────────
-builder.Services.AddScoped<DeviceAuthFilter>();
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
 var origins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? ["*"];
@@ -78,31 +36,6 @@ builder.Services.AddSwaggerGen(c =>
         Version = "v1",
         Description = "Guardian-side backend: track IoT devices, receive SOS alerts.",
     });
-    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
-    {
-        Type = SecuritySchemeType.Http,
-        Scheme = "bearer",
-        BearerFormat = "JWT",
-        Description = "Paste your access token here.",
-    });
-    c.AddSecurityRequirement(new OpenApiSecurityRequirement
-    {
-        {
-            new OpenApiSecurityScheme
-            {
-                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
-            },
-            Array.Empty<string>()
-        }
-    });
-    c.AddSecurityDefinition("DeviceKey", new OpenApiSecurityScheme
-    {
-        Type = SecuritySchemeType.ApiKey,
-        In = ParameterLocation.Header,
-        Name = "X-Device-Key",
-        Description = "IoT device authentication key.",
-    });
-    c.OperationFilter<SafeEye.API.Filters.DeviceKeyOperationFilter>();
 });
 
 // ── Health checks ─────────────────────────────────────────────────────────────
@@ -133,8 +66,6 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors();
-app.UseAuthentication();
-app.UseAuthorization();
 
 app.MapControllers();
 app.MapHub<TrackingHub>("/hubs/tracking");

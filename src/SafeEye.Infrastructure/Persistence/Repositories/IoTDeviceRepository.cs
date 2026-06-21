@@ -13,11 +13,11 @@ public sealed class IoTDeviceRepository(AppDbContext db) : IIoTDeviceRepository
     public Task<IoTDevice?> GetByDeviceKeyAsync(string deviceKey, CancellationToken ct = default)
         => db.IoTDevices.FirstOrDefaultAsync(d => d.DeviceKey == deviceKey, ct);
 
+    public Task<IoTDevice?> GetByDeviceIdAsync(string deviceId, CancellationToken ct = default)
+        => db.IoTDevices.FirstOrDefaultAsync(d => d.DeviceId == deviceId, ct);
+
     public Task<IoTDevice?> GetByFirebaseKeyAsync(string firebaseKey, CancellationToken ct = default)
         => db.IoTDevices.FirstOrDefaultAsync(d => d.FirebaseDeviceKey == firebaseKey, ct);
-
-    public Task<IoTDevice?> GetByFirebaseUserIdAsync(string firebaseUserId, CancellationToken ct = default)
-        => db.IoTDevices.FirstOrDefaultAsync(d => d.FirebaseUserId == firebaseUserId, ct);
 
     public Task<List<IoTDevice>> GetAllWithFirebaseKeyAsync(CancellationToken ct = default)
         => db.IoTDevices

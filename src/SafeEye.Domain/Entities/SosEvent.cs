@@ -12,11 +12,10 @@ public sealed class SosEvent
     public double? Longitude { get; private set; }
     public SosStatus Status { get; private set; }
     public DateTime? ResolvedAt { get; private set; }
-    public Guid? ResolvedById { get; private set; }
+    public string? ResolvedByGuardianUuid { get; private set; }
     public DateTime CreatedAt { get; private set; }
 
     public IoTDevice Device { get; private set; } = null!;
-    public User? ResolvedBy { get; private set; }
 
     public static SosEvent Create(Guid deviceId, double? lat, double? lng) => new()
     {
@@ -28,10 +27,10 @@ public sealed class SosEvent
         CreatedAt = DateTime.UtcNow,
     };
 
-    public void Resolve(Guid resolvedById)
+    public void Resolve(string guardianUuid)
     {
         Status = SosStatus.Resolved;
-        ResolvedById = resolvedById;
+        ResolvedByGuardianUuid = guardianUuid;
         ResolvedAt = DateTime.UtcNow;
     }
 }

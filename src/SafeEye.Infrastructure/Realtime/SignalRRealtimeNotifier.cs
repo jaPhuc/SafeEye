@@ -18,6 +18,6 @@ public sealed class SignalRRealtimeNotifier(IHubContext<TrackingHub, ITrackingCl
     public Task NotifySosResolvedAsync(SosResolvedPayload p, CancellationToken ct = default)
         => hub.Clients.Group(G(p.DeviceId))
               .ReceiveSosResolved(new SosResolvedMessage(
-                  p.SosEventId, p.DeviceId, p.ResolvedById, p.Timestamp));
+                  p.SosEventId, p.DeviceId, p.ResolvedByGuardianUuid, p.Timestamp));
     // NotifyLocationUpdateAsync removed
 }
